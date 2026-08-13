@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAG Quality Dashboard</title>
+<style>
+  /* ---- palette (validated dataviz reference instance) ---- */
+  .viz-root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --muted:          #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6; /* faithfulness      */
+    --series-2:       #eb6834; /* answer_relevancy  */
+    --series-3:       #1baf7a; /* context_precision */
+    --series-4:       #eda100; /* context_recall    */
+    --good:           #0ca30c;
+    --critical:       #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --page:           #0d0d0d;
+      --surface-1:      #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted:          #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --series-3:       #199e70;
+      --series-4:       #c98500;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .viz-root { max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--text-secondary); font-size: 13px; }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-top: 20px;
+  }
+  h2 { font-size: 14px; margin: 0 0 14px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+
+  /* ---- KPI tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile .label { font-size: 12px; color: var(--text-secondary); }
+  .tile .value { font-size: 28px; margin: 6px 0 4px; }
+  .tile .gate { font-size: 11px; color: var(--muted); }
+  .status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; margin-top: 6px; }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .pass { color: var(--good); } .pass .dot { background: var(--good); }
+  .fail { color: var(--critical); } .fail .dot { background: var(--critical); }
+
+  /* ---- legend ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 8px; }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .legend .swatch { width: 12px; height: 3px; border-radius: 2px; }
+
+  svg { width: 100%; height: auto; display: block; }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .axis-line { stroke: var(--baseline); stroke-width: 1; }
+  .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .end-label { font-size: 11px; font-weight: 600; }
+  .crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+
+  .tooltip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15); z-index: 10;
+  }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+  .tooltip .tt-row .sw { width: 10px; height: 3px; border-radius: 2px; }
+  .tooltip .tt-val { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .tooltip .tt-head { font-weight: 600; margin-bottom: 2px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 4px; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  .toggle { background: none; border: 1px solid var(--border); color: var(--text-secondary);
+            border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .empty { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+  code { background: var(--grid); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <header>
+    <div>
+      <h1>RAG Quality Dashboard</h1>
+      <div class="sub" id="subtitle">Ragas metrics across evaluation runs</div>
+    </div>
+    <button class="toggle" id="tableToggle" hidden>Table view</button>
+  </header>
+
+  <div id="content"></div>
+</div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const METRICS = [
+  { key: "faithfulness",      label: "Faithfulness",      varName: "--series-1" },
+  { key: "answer_relevancy",  label: "Answer Relevancy",  varName: "--series-2" },
+  { key: "context_precision", label: "Context Precision", varName: "--series-3" },
+  { key: "context_recall",    label: "Context Recall",    varName: "--series-4" },
+];
+const SVGNS = "http://www.w3.org/2000/svg";
+let showTable = false;
+let RUNS = [];
+
+function cssVar(name) {
+  return getComputedStyle(document.querySelector(".viz-root")).getPropertyValue(name).trim();
+}
+function el(tag, attrs = {}, text) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+async function load() {
+  const content = document.getElementById("content");
+  try {
+    const res = await fetch("/metrics/history");
+    RUNS = (await res.json()).runs || [];
+  } catch (e) {
+    content.innerHTML = `<div class="card empty">Could not reach the API. Is the server running?</div>`;
+    return;
+  }
+  if (RUNS.length === 0) {
+    content.innerHTML = `<div class="card empty">
+      No evaluation runs yet.<br>
+      Build the index and run an evaluation, then refresh:
+      <br><br><code>make ingest</code> &nbsp; then &nbsp; <code>make eval</code>
+      <br>or <code>POST /evaluate</code> against the API.
+    </div>`;
+    return;
+  }
+  document.getElementById("tableToggle").hidden = false;
+  render();
+}
+
+function metricScore(run, key) {
+  const m = run.metrics.find(x => x.name === key);
+  return m ? m.score : null;
+}
+
+function render() {
+  const content = document.getElementById("content");
+  content.innerHTML = "";
+  const latest = RUNS[RUNS.length - 1];
+  document.getElementById("subtitle").textContent =
+    `${RUNS.length} run${RUNS.length > 1 ? "s" : ""} · latest ${new Date(latest.timestamp).toLocaleString()} · judge ${latest.judge_model}`;
+
+  content.appendChild(renderTiles(latest));
+
+  const card = document.createElement("div");
+  card.className = "card";
+  const h2 = document.createElement("h2");
+  h2.textContent = "Metrics over time";
+  card.appendChild(h2);
+  card.appendChild(showTable ? renderTable() : renderChartWithLegend());
+  content.appendChild(card);
+}
+
+function renderTiles(latest) {
+  const wrap = document.createElement("div");
+  const h2 = document.createElement("h2"); h2.textContent = "Latest run"; wrap.appendChild(h2);
+  const tiles = document.createElement("div"); tiles.className = "tiles";
+
+  const overall = document.createElement("div");
+  overall.className = "tile";
+  overall.innerHTML = `<div class="label">Overall gate</div>
+    <div class="value">${latest.passed ? "PASS" : "FAIL"}</div>
+    <div class="status ${latest.passed ? "pass" : "fail"}"><span class="dot"></span>${latest.passed ? "All gates cleared" : "Gate breached"}</div>`;
+  tiles.appendChild(overall);
+
+  for (const spec of METRICS) {
+    const m = latest.metrics.find(x => x.name === spec.key);
+    if (!m) continue;
+    const t = document.createElement("div");
+    t.className = "tile";
+    t.innerHTML = `<div class="label">${spec.label}</div>
+      <div class="value" style="color:var(${spec.varName})">${m.score.toFixed(2)}</div>
+      <div class="gate">gate ≥ ${m.threshold.toFixed(2)}</div>
+      <div class="status ${m.passed ? "pass" : "fail"}"><span class="dot"></span>${m.passed ? "Pass" : "Fail"}</div>`;
+    tiles.appendChild(t);
+  }
+  wrap.appendChild(tiles);
+  return wrap;
+}
+
+function renderChartWithLegend() {
+  const box = document.createElement("div");
+  const legend = document.createElement("div");
+  legend.className = "legend";
+  for (const m of METRICS) {
+    const item = document.createElement("div"); item.className = "item";
+    item.innerHTML = `<span class="swatch" style="background:var(${m.varName})"></span>${m.label}`;
+    legend.appendChild(item);
+  }
+  box.appendChild(legend);
+  box.appendChild(renderChart());
+  return box;
+}
+
+function renderChart() {
+  const W = 900, H = 380, m = { top: 16, right: 130, bottom: 34, left: 40 };
+  const plotW = W - m.left - m.right, plotH = H - m.top - m.bottom;
+  const n = RUNS.length;
+  const x = i => m.left + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1));
+  const y = v => m.top + plotH * (1 - v); // scores are 0..1
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of Ragas metrics over evaluation runs" });
+
+  // gridlines + y ticks (0, .25, .5, .75, 1)
+  for (const gv of [0, 0.25, 0.5, 0.75, 1]) {
+    svg.appendChild(el("line", { class: "grid-line", x1: m.left, y1: y(gv), x2: m.left + plotW, y2: y(gv) }));
+    svg.appendChild(el("text", { class: "tick", x: m.left - 8, y: y(gv) + 4, "text-anchor": "end" }, gv.toFixed(2)));
+  }
+  // baseline
+  svg.appendChild(el("line", { class: "axis-line", x1: m.left, y1: y(0), x2: m.left + plotW, y2: y(0) }));
+
+  // x ticks (first, mid, last to avoid clutter)
+  const idxs = n <= 6 ? [...Array(n).keys()] : [0, Math.floor((n - 1) / 2), n - 1];
+  for (const i of idxs) {
+    const d = new Date(RUNS[i].timestamp);
+    const lbl = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    svg.appendChild(el("text", { class: "tick", x: x(i), y: y(0) + 20, "text-anchor": "middle" }, lbl));
+  }
+
+  // one line per metric
+  for (const spec of METRICS) {
+    const color = cssVar(spec.varName);
+    const pts = RUNS.map((r, i) => [x(i), y(metricScore(r, spec.key) ?? 0)]);
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+    svg.appendChild(el("path", { d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    // markers with a 2px surface ring
+    for (const p of pts) {
+      svg.appendChild(el("circle", { cx: p[0], cy: p[1], r: 4, fill: color, stroke: cssVar("--surface-1"), "stroke-width": 2 }));
+    }
+    // direct label at line end
+    const last = pts[pts.length - 1];
+    svg.appendChild(el("text", { class: "end-label", x: last[0] + 8, y: last[1] + 4, fill: color }, spec.label));
+  }
+
+  // hover crosshair + tooltip
+  const cross = el("line", { class: "crosshair", y1: m.top, y2: m.top + plotH, x1: 0, x2: 0, opacity: 0 });
+  svg.appendChild(cross);
+  const tip = document.getElementById("tooltip");
+  const overlay = el("rect", { x: m.left, y: m.top, width: plotW, height: plotH, fill: "transparent" });
+  overlay.style.cursor = "crosshair";
+  overlay.addEventListener("mousemove", (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * (W / rect.width);
+    let i = 0, best = Infinity;
+    RUNS.forEach((_, k) => { const dd = Math.abs(x(k) - px); if (dd < best) { best = dd; i = k; } });
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("opacity", 1);
+    const run = RUNS[i];
+    let html = `<div class="tt-head">${new Date(run.timestamp).toLocaleString()}</div>`;
+    for (const spec of METRICS) {
+      const v = metricScore(run, spec.key);
+      html += `<div class="tt-row"><span class="sw" style="background:var(${spec.varName})"></span>${spec.label}<span class="tt-val">${v == null ? "–" : v.toFixed(3)}</span></div>`;
+    }
+    tip.innerHTML = html;
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(ev.clientX + 14, window.innerWidth - 200) + "px";
+    tip.style.top = (ev.clientY + 14) + "px";
+  });
+  overlay.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); tip.style.opacity = 0; });
+  svg.appendChild(overlay);
+
+  return svg;
+}
+
+function renderTable() {
+  const t = document.createElement("table");
+  const head = t.insertRow();
+  head.insertCell().outerHTML = "<th>Run</th>";
+  for (const m of METRICS) head.insertCell().outerHTML = `<th>${m.label}</th>`;
+  head.insertCell().outerHTML = "<th>Gate</th>";
+  for (const run of RUNS) {
+    const row = t.insertRow();
+    row.insertCell().textContent = new Date(run.timestamp).toLocaleString();
+    for (const m of METRICS) {
+      const v = metricScore(run, m.key);
+      row.insertCell().textContent = v == null ? "–" : v.toFixed(3);
+    }
+    row.insertCell().textContent = run.passed ? "PASS" : "FAIL";
+  }
+  return t;
+}
+
+document.getElementById("tableToggle").addEventListener("click", (e) => {
+  showTable = !showTable;
+  e.target.textContent = showTable ? "Chart view" : "Table view";
+  render();
+});
+
+load();
+</script>
+</body>
+</html>

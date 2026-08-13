@@ -1,0 +1,44 @@
+[project]
+name = "ragas-demo-application"
+version = "0.1.0"
+description = "A RAG application with a Quality Engineering focus (local models + Ragas evals)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # --- application ---
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "numpy>=1.26",
+    "requests>=2.31",
+    "ollama>=0.3",
+    # --- evaluation (Ragas) ---
+    # Ragas 0.4.x ships UNPINNED langchain deps and still imports paths that
+    # langchain 1.x removed (langchain_community.chat_models.vertexai). Pinning
+    # the langchain stack to the 0.3.x line it was built against is REQUIRED.
+    "ragas==0.4.3",
+    "openai>=1.30",
+    "langchain>=0.3,<1.0",
+    "langchain-core>=0.3,<1.0",
+    "langchain-community>=0.3,<0.4",
+    "langchain-openai>=0.2,<1.0",
+    "langchain-ollama>=0.2,<1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.uv]
+# Source-tree layout: import app/ and eval/ directly, don't build/install the
+# project itself into the environment.
+package = false
